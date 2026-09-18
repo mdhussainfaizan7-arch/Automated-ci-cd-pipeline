@@ -12,6 +12,8 @@ pipeline {
         DOCKER_CRED_ID = 'Docker-Creds'
         IMAGE_NAME = "${DOCKER_USER}/${APP_NAME}"
         IMAGE_TAG = "${RELEASE}-${BUILD_NUMBER}"
+        SONAR_HOST_URL = "http://13.234.172.166:9000"
+        NOTIFICATION_EMAIL = "mdhussainfaizan7@gmail.com"
     }
 
     stages {
@@ -27,15 +29,9 @@ pipeline {
             }
         }
 
-        stage("Build Application") {
+        stage("Build & Test Application") {
             steps {
-                sh "mvn clean package"
-            }
-        }
-
-        stage("Test Application") {
-            steps {
-                sh "mvn test"
+                sh "mvn clean test package"
             }
         }
 
@@ -43,7 +39,7 @@ pipeline {
             steps {
                 script {
                     withSonarQubeEnv(credentialsId: 'SonarQube-token') { 
-                        sh "mvn sonar:sonar -Dsonar.host.url=http://13.234.172.166:9000"
+                        sh "mvn sonar:sonar -Dsonar.host.url=${SONAR_HOST_URL}"
                     }
                 }    
             }
@@ -57,6 +53,9 @@ pipeline {
             }
         }
 
+        // --- JFrog Artifactory stages omitted since no Maven JFrog repository was created ---
+        // Uncomment and configure once you create your JFrog Artifactory repository:
+        /*
         stage('Artifactory Configuration') {
             steps {
                 rtServer (
@@ -84,7 +83,7 @@ pipeline {
         stage('Deploy Artifacts') {
             steps {
                 rtMavenRun (
-                    tool: "Maven",
+                    tool: "maven",
                     pom: 'webapp/pom.xml',
                     goals: 'clean install',
                     deployerId: "MAVEN_DEPLOYER",
@@ -100,11 +99,12 @@ pipeline {
                 )
             }
         }
+        */
 
         stage("Build & Push Docker Image") {
             steps {
                 script {
-                    docker.withRegistry('', DOCKER_CRED_ID) {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_CRED_ID) {
                         def docker_image = docker.build("${IMAGE_NAME}:${IMAGE_TAG}")
                         docker_image.push("${IMAGE_TAG}")
                         docker_image.push('latest')
@@ -129,9 +129,31 @@ pipeline {
                 }
             }
         }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                script {
+                    dir('Kubernete') {
+                        kubeconfig(credentialsId: 'kubernetes', serverUrl: '') {
+                            sh 'kubectl apply -f regapp-deploy.yml'
+                            sh 'kubectl apply -f regapp-service.yml'
+                            sh 'kubectl rollout restart deployment.apps/regapp-deployment'
+                        }
+                    }
+                }
+            }
+        }
     }
 
     post {
+        failure {
+            emailext (
+                body: '''${SCRIPT, template="groovy-html.template"}''', 
+                subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed ❌", 
+                mimeType: 'text/html',
+                to: "${NOTIFICATION_EMAIL}"
+            )
+        }
         success {
             emailext (
                 body: '''<html>
@@ -140,21 +162,13 @@ pipeline {
                         <p><strong>Job:</strong> ${env.JOB_NAME}</p>
                         <p><strong>Build Number:</strong> ${env.BUILD_NUMBER}</p>
                         <p><strong>Build Status:</strong> SUCCESS</p>
-                        <p>Artifacts have been successfully deployed to JFrog Artifactory.</p>
+                        <p><strong>Docker Image:</strong> ${IMAGE_NAME}:${IMAGE_TAG}</p>
                         <p><strong>Build URL:</strong> <a href="${env.BUILD_URL}">${env.BUILD_URL}</a></p>
                     </body>
                 </html>''', 
                 subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Successful ✅", 
                 mimeType: 'text/html',
-                to: "ashfaque.s510@gmail.com, mdhussainfaizan7@gmail.com"
-            )
-        }
-        failure {
-            emailext (
-                body: '''${SCRIPT, template="groovy-html.template"}''', 
-                subject: "${env.JOB_NAME} - Build # ${env.BUILD_NUMBER} - Failed ❌", 
-                mimeType: 'text/html',
-                to: "mdhussainfaizan7@gmail.com"
+                to: "${NOTIFICATION_EMAIL}"
             )
         }
     }
