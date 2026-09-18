@@ -25,7 +25,7 @@ pipeline {
 
         stage("Checkout from SCM") {
             steps {
-                git branch: 'main', credentialsId: 'github-token-auth', url: 'https://github.com/mdhussainfaizan7-arch/Automated-ci-cd-pipeline.git'
+                git branch: 'main', credentialsId: 'github-creds', url: 'https://github.com/mdhussainfaizan7-arch/Automated-ci-cd-pipeline.git'
             }
         }
 
@@ -38,7 +38,7 @@ pipeline {
         stage("SonarQube Analysis") {
             steps {
                 script {
-                    withSonarQubeEnv(credentialsId: 'SonarQube-token') { 
+                    withSonarQubeEnv(credentialsId: 'sonarqube-token') { 
                         sh "mvn sonar:sonar -Dsonar.host.url=${SONAR_HOST_URL}"
                     }
                 }    
@@ -48,7 +48,7 @@ pipeline {
         stage("Quality Gate") {
             steps {
                 script {
-                    waitForQualityGate abortPipeline: false, credentialsId: 'SonarQube-token'
+                    waitForQualityGate abortPipeline: false, credentialsId: 'sonarqube-token'
                 }    
             }
         }
